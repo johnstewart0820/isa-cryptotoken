@@ -16,9 +16,12 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
 
     string private _symbol;
 
+    uint8 private _decimals;
+
     constructor (string memory name, string memory symbol) public {
         _name = name;
         _symbol = symbol;
+        _decimals = 18;
     }
 
     function name() public view virtual override returns (string memory) {
