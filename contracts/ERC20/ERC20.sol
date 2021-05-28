@@ -1,22 +1,65 @@
 pragma solidity >=0.4.25 <0.8.0;
 pragma experimental ABIEncoderV2;
 
-import "./IERC20.sol";
-import "./IERC20Metadata.sol";
-import "../utils/Context.sol";
+interface IERC20 {
+
+    function totalSupply() external view returns (uint256);
+
+    function balanceOf(address account) external view returns (uint256);
+
+    function transfer(address recipient, uint256 amount)
+        external
+        returns (bool);
+
+    function allowance(address owner, address spender)
+        external
+        view
+        returns (uint256);
+
+    function approve(address spender, uint256 amount) external returns (bool);
+
+    function transferFrom(
+        address sender,
+        address recipient,
+        uint256 amount
+    ) external returns (bool);
+
+    event Transfer(address indexed from, address indexed to, uint256 value);
+
+    event Approval(
+        address indexed owner,
+        address indexed spender,
+        uint256 value
+    );
+}
+
+interface IERC20Metadata is IERC20 {
+
+    function name() external view returns (string memory);
+
+    function symbol() external view returns (string memory);
+
+    function decimals() external view returns (uint8);
+}
+
+contract Context {
+
+    function _msgSender() internal view virtual returns (address) {
+        return msg.sender;
+    }
+}
 
 contract ERC20 is Context, IERC20, IERC20Metadata {
-
-    mapping(address => uint256) private _balances;
-
-    mapping(address => mapping(address => uint256)) private _allowances;
-
     struct History {
         uint256 timestamp;
         uint256 amount;
     }
     
-    mapping(address => History[] ) private _histories;
+    mapping(address => History[]) private _buyHistories;
+
+    mapping(address => uint256) private _balances;
+
+    mapping(address => mapping(address => uint256)) private _allowances;
 
     uint256 private _totalSupply;
 
@@ -25,13 +68,15 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
     string private _symbol;
 
     uint8 private _decimals;
+    
+    address private minter;
 
     constructor(string memory name, string memory symbol) public {
         _name = name;
         _symbol = symbol;
         _decimals = 18;
-        
-         _mint(_msgSender(), 400000000 * (10 ** 18));
+        _mint(_msgSender(), 400000000 * (10 ** uint(decimals())));
+        minter = _msgSender();
     }
 
     function name() public view virtual override returns (string memory) {
@@ -87,15 +132,6 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
         returns (bool)
     {
         _approve(_msgSender(), spender, amount);
-    }
-
-    function amount_history(address owner)
-        public
-        view
-        virtual
-        returns (History[] memory)
-    {
-        return _histories[owner];   
     }
 
     function transferFrom(
@@ -154,8 +190,6 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
         require(senderBalance >= amount, "Transfer amount exceeds balance");
         _balances[sender] = senderBalance - amount;
         _balances[recipient] += amount;
-        _setHistory(recipient, now, amount);
-        _setHistory(sender, now, amount * -1);
         emit Transfer(sender, recipient, amount);
     }
 
@@ -178,7 +212,6 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
 
         _totalSupply += amount;
         _balances[account] += amount;
-        _setHistory(account, now, amount);
         emit Transfer(address(0), account, amount);
     }
 
@@ -195,26 +228,48 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
         emit Transfer(account, address(0), amount);
     }
 
-    function _setHistory(
-        address recipient,
-        uint256 timestamp,
-        uint256 amount
-    ) internal virtual {
-        _histories[recipient].push(History(timestamp, amount));
-    }
-
     function _beforeTokenTransfer(
         address from,
         address to,
         uint256 amount
-    ) internal virtual {
-        uint256 allowed_money = 0;
-        for (uint256 i = 0; i < _histories[from].length; i ++) {
-            History _history = _histories[from][i];
-            if (_history.timestamp < now - 100 || _history.amount < 0) {
-                allowed_money += _history.amount;
+    ) internal virtual { }
+    
+    function buy(uint256 _amount) external {
+        _transfer(minter, msg.sender, _amount);
+        _buyHistories[msg.sender].push(History(now, _amount));
+    }
+    
+    function sell(uint256 _amount) external {
+        uint256 allowedAmount = 0;
+        for(uint256 i = 0; i < _buyHistories[msg.sender].length; i++) {
+            History memory _history = _buyHistories[msg.sender][i];
+            if (_history.timestamp < now - 100) {
+                allowedAmount += _history.amount; 
             }
         }
-        require(senderBalance <= allowed_money, "Transfer amount exceeds time limit");
+        
+        require(_amount <= allowedAmount, "Transfer amount exceeds time limit");
+        
+        uint256 deleteAmount = 0;
+        for(uint256 i = 0; i < _buyHistories[msg.sender].length; i++) {
+            History memory _history = _buyHistories[msg.sender][i];
+            if (deleteAmount + _history.amount <= _amount)
+            {
+                deleteAmount += _history.amount;
+                _balances[msg.sender] -= _history.amount;
+                _balances[minter] += _history.amount;
+                delete _buyHistories[msg.sender][i];
+            }
+            else if (deleteAmount < _amount && deleteAmount + _history.amount > _amount)
+            {
+                _balances[msg.sender] -= (_amount - deleteAmount);
+                _balances[minter] += (_amount - deleteAmount);
+                _history.amount -= (_amount - deleteAmount);
+                deleteAmount = _amount;
+                break;
+            }
+        }
+
+        emit Transfer(msg.sender, address(this), _amount);
     }
 }
