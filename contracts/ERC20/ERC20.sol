@@ -1,14 +1,22 @@
 pragma solidity >=0.4.25 <0.8.0;
+pragma experimental ABIEncoderV2;
 
 import "./IERC20.sol";
 import "./IERC20Metadata.sol";
 import "../utils/Context.sol";
 
 contract ERC20 is Context, IERC20, IERC20Metadata {
-    
-    mapping (address => uint256) private _balances;
 
-    mapping (address => mapping (address => uint256)) private _allowances;
+    mapping(address => uint256) private _balances;
+
+    mapping(address => mapping(address => uint256)) private _allowances;
+
+    struct History {
+        uint256 timestamp;
+        uint256 amount;
+    }
+    
+    mapping(address => History[] ) private _histories;
 
     uint256 private _totalSupply;
 
@@ -18,10 +26,12 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
 
     uint8 private _decimals;
 
-    constructor (string memory name, string memory symbol) public {
+    constructor(string memory name, string memory symbol) public {
         _name = name;
         _symbol = symbol;
         _decimals = 18;
+        
+         _mint(_msgSender(), 400000000 * (10 ** 18));
     }
 
     function name() public view virtual override returns (string memory) {
@@ -40,58 +50,120 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
         return _totalSupply;
     }
 
-    function balanceOf(address account) public view virtual override returns (uint256) {
+    function balanceOf(address account)
+        public
+        view
+        virtual
+        override
+        returns (uint256)
+    {
         return _balances[account];
     }
 
-    function transfer(address recipient, uint256 amount) public virtual override returns (bool) {
+    function transfer(address recipient, uint256 amount)
+        public
+        virtual
+        override
+        returns (bool)
+    {
         _transfer(_msgSender(), recipient, amount);
         return true;
     }
 
-    function allowance(address owner, address spender) public view virtual override returns (uint256) {
+    function allowance(address owner, address spender)
+        public
+        view
+        virtual
+        override
+        returns (uint256)
+    {
         return _allowances[owner][spender];
     }
 
-    function approve(address spender, uint256 amount) public virtual override returns (bool) {
+    function approve(address spender, uint256 amount)
+        public
+        virtual
+        override
+        returns (bool)
+    {
         _approve(_msgSender(), spender, amount);
     }
 
-    function transferFrom(address sender, address recipient, uint256 amount) public virtual override returns (bool) {
+    function amount_history(address owner)
+        public
+        view
+        virtual
+        returns (History[] memory)
+    {
+        return _histories[owner];   
+    }
+
+    function transferFrom(
+        address sender,
+        address recipient,
+        uint256 amount
+    ) public virtual override returns (bool) {
         _transfer(sender, recipient, amount);
 
         uint256 currentAllowance = _allowances[sender][_msgSender()];
-        require(currentAllowance >= amount, "Transfer amount exceeds allowance");
+        require(
+            currentAllowance >= amount,
+            "Transfer amount exceeds allowance"
+        );
         _approve(sender, _msgSender(), currentAllowance - amount);
         return true;
     }
 
-    function increaseAllowance(address spender, uint256 addedValue) public virtual returns (bool) {
-        _approve(_msgSender(), spender, _allowances[_msgSender()][spender] + addedValue);
+    function increaseAllowance(address spender, uint256 addedValue)
+        public
+        virtual
+        returns (bool)
+    {
+        _approve(
+            _msgSender(),
+            spender,
+            _allowances[_msgSender()][spender] + addedValue
+        );
         return true;
     }
 
-    function decreaseAllowance(address spender, uint256 subtractedValue) public virtual returns (bool) {
+    function decreaseAllowance(address spender, uint256 subtractedValue)
+        public
+        virtual
+        returns (bool)
+    {
         uint256 currentAllowance = _allowances[_msgSender()][spender];
-        require(currentAllowance >= subtractedValue, "Decreased allowance below zero");
+        require(
+            currentAllowance >= subtractedValue,
+            "Decreased allowance below zero"
+        );
         _approve(_msgSender(), spender, currentAllowance - subtractedValue);
     }
 
-    function _transfer(address sender, address recipient, uint256 amount) internal virtual {
+    function _transfer(
+        address sender,
+        address recipient,
+        uint256 amount
+    ) internal virtual {
         require(sender != address(0), "Transfer from the zero address");
         require(recipient != address(0), "Transfer to the zero address");
-
+        
         _beforeTokenTransfer(sender, recipient, amount);
 
         uint256 senderBalance = _balances[sender];
         require(senderBalance >= amount, "Transfer amount exceeds balance");
         _balances[sender] = senderBalance - amount;
         _balances[recipient] += amount;
-
+        _setHistory(recipient, now, amount);
+        _setHistory(sender, now, amount * -1);
         emit Transfer(sender, recipient, amount);
     }
 
-    function _approve(address owner, address spender, uint256 amount) internal virtual {
+    function _approve(
+        address owner,
+        address spender,
+        uint256 amount
+    ) internal virtual {
         require(owner != address(0), "Approve from the zero address");
         require(spender != address(0), "Approve to the zero address");
 
@@ -106,6 +178,7 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
 
         _totalSupply += amount;
         _balances[account] += amount;
+        _setHistory(account, now, amount);
         emit Transfer(address(0), account, amount);
     }
 
@@ -122,7 +195,26 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
         emit Transfer(account, address(0), amount);
     }
 
-    function _beforeTokenTransfer(address from, address to, uint256 amount) internal virtual {
+    function _setHistory(
+        address recipient,
+        uint256 timestamp,
+        uint256 amount
+    ) internal virtual {
+        _histories[recipient].push(History(timestamp, amount));
+    }
 
+    function _beforeTokenTransfer(
+        address from,
+        address to,
+        uint256 amount
+    ) internal virtual {
+        uint256 allowed_money = 0;
+        for (uint256 i = 0; i < _histories[from].length; i ++) {
+            History _history = _histories[from][i];
+            if (_history.timestamp < now - 100 || _history.amount < 0) {
+                allowed_money += _history.amount;
+            }
+        }
+        require(senderBalance <= allowed_money, "Transfer amount exceeds time limit");
     }
 }
